@@ -28,7 +28,11 @@ type GameServerConfig struct {
 }
 
 type MySqlConfig struct {
-	Address string
+	Address       string
+	RootName      string
+	Password      string
+	PoolSize      int
+	RequestBuffer int
 }
 
 type RedisConfig struct {
@@ -64,6 +68,10 @@ func LoadConfig(version string) (AllConfig, bool) {
 
 	section = config.Section("MySQL")
 	allConfig.MySqlConfig.Address = section.Key("Address").String()
+	allConfig.MySqlConfig.RootName = section.Key("RootName").String()
+	allConfig.MySqlConfig.Password = section.Key("Password").String()
+	allConfig.MySqlConfig.PoolSize, _ = section.Key("PoolSize").Int()
+	allConfig.MySqlConfig.RequestBuffer, _ = section.Key("RequestBuffer").Int()
 
 	if checkConfig(&allConfig) == false {
 		return AllConfig{}, false
@@ -74,25 +82,48 @@ func LoadConfig(version string) (AllConfig, bool) {
 }
 
 func checkConfig(config *AllConfig) bool {
+	// Check GameServer
 	if config.GameServerConfig.Address == "" {
 		log.LocalLogger.Error("GameSererConfig address is empty!")
 		return false
 	}
+
+	// Check Redis
 	if config.RedisConfig.Address == "" {
 		log.LocalLogger.Error("RedisConfig address is empty!")
 		return false
 	}
+
+	// Check Mysql
 	if config.MySqlConfig.Address == "" {
 		log.LocalLogger.Error("MysqlConfig address is empty!")
 		return false
 	}
+	if config.MySqlConfig.RootName == "" {
+		log.LocalLogger.Error("MysqlConfig root name is empty!")
+		return false
+	}
+	if config.MySqlConfig.PoolSize < 1 {
+		log.LocalLogger.Error("MysqlConfig PoolSize < 1!", zap.Int("PoolSize", config.MySqlConfig.PoolSize))
+		return false
+	}
+	if config.MySqlConfig.RequestBuffer < 1 {
+		log.LocalLogger.Error("MysqlConfig RequestBuffer < 1!", zap.Int("RequestBuffer", config.MySqlConfig.RequestBuffer))
+		return false
+	}
+
 	return true
 }
 
 func writeInfoLog(config *AllConfig) {
 	log.LocalLogger.Info("GameServerConfig", zap.String("Address", config.GameServerConfig.Address))
 	log.LocalLogger.Info("RedisConfig", zap.String("Address", config.RedisConfig.Address))
-	log.LocalLogger.Info("MysqlConfig", zap.String("Address", config.MySqlConfig.Address))
+	log.LocalLogger.Info("MysqlConfig",
+		zap.String("Address", config.MySqlConfig.Address),
+		zap.String("RootName", config.MySqlConfig.RootName),
+		zap.String("Password", config.MySqlConfig.Password),
+		zap.Int("PoolSize", config.MySqlConfig.PoolSize),
+		zap.Int("RequestBuffer", config.MySqlConfig.RequestBuffer))
 }
 
 func CheckServerVersion(version string) bool {

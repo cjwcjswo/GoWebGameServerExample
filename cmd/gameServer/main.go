@@ -32,6 +32,5 @@ func main() {
 		log.LocalLogger.Error("NewGameServer Fail!: ", zap.String("Version", *version))
 		return
 	}
-
 	server.StartServer()
 }
