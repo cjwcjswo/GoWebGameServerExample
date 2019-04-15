@@ -3,13 +3,14 @@ package handler
 import (
 	"GoWebGameServerExample/pkg/log"
 	"GoWebGameServerExample/pkg/protocol"
+	"GoWebGameServerExample/pkg/util"
 	"encoding/json"
 	"go.uber.org/zap"
 	"io/ioutil"
 	"net/http"
 )
 
-type GatewayRequest struct {
+type gatewayRequest struct {
 	Seq      *int64           `json:"seq"`
 	ApiKey   *string          `json:"api_key"`
 	ApiVer   *int16           `json:"api_ver"`
@@ -22,49 +23,12 @@ type GatewayRequest struct {
 	Params   *json.RawMessage `json:"params"`
 }
 
-func (request *GatewayRequest) Decoding(data []byte) (protocol.ErrorCode, string) {
-	err := json.Unmarshal(data, &request)
-	if err != nil {
-		log.LocalLogger.Error("GatewayRequest Decoding Fail", zap.String("Error", err.Error()))
-		return protocol.ERROR_GATEWAY_DECODING_FAIL, err.Error()
-	}
-	if request.Seq == nil {
-		return protocol.ERROR_INVALID_REQUEST_VALUE, "Sequence is nil"
-	}
-	if request.ApiKey == nil {
-		return protocol.ERROR_INVALID_REQUEST_VALUE, "ApiKey is nil"
-	}
-	if request.ApiVer == nil {
-		return protocol.ERROR_INVALID_REQUEST_VALUE, "ApiVer is nil"
-	}
-	if request.Ts == nil {
-		return protocol.ERROR_INVALID_REQUEST_VALUE, "Ts is nil"
-	}
-	if request.Uid == nil {
-		return protocol.ERROR_INVALID_REQUEST_VALUE, "Uid is nil"
-	}
-	if request.Sid == nil {
-		return protocol.ERROR_INVALID_REQUEST_VALUE, "Sid is nil"
-	}
-	if request.Version == nil {
-		return protocol.ERROR_INVALID_REQUEST_VALUE, "Version is nil"
-	}
-	if request.Language == nil {
-		return protocol.ERROR_INVALID_REQUEST_VALUE, "Language is nil"
-	}
-	if request.Resend == nil {
-		return protocol.ERROR_INVALID_REQUEST_VALUE, "Resend is nil"
-	}
-
-	return protocol.ERROR_SUCCESS, ""
-}
-
-type GatewayResponse struct {
-	ApiResult    GatewayApiResult `json:"api_result"`
+type gatewayResponse struct {
+	ApiResult    gatewayApiResult `json:"api_result"`
 	ResponseData interface{}      `json:"response_data"`
 }
 
-type GatewayApiResult struct {
+type gatewayApiResult struct {
 	Seq       int64              `json:"seq"`
 	ApiKey    string             `json:"api_key"`
 	ApiVer    int16              `json:"api_ver"`
@@ -74,12 +38,26 @@ type GatewayApiResult struct {
 	Message   string             `json:"message"`
 }
 
-type GatewayHandler struct{}
+type GatewayHandler struct {
+	handlerMap map[string]InterfaceGameHandler
+	parser     util.Parser
+}
+
+func NewGatewayHandler() *GatewayHandler {
+	handler := new(GatewayHandler)
+	handler.parser = new(util.JsonParser) // Parser Setting
+	handler.handlerMap = make(map[string]InterfaceGameHandler)
+
+	// Init Logic Handler
+	handler.handlerMap[API_NAME_CHECK_UPDATE] = NewCheckUpdateHandler()
+
+	return handler
+}
 
 func (handler *GatewayHandler) Handle(writer http.ResponseWriter, request *http.Request) {
-	var response GatewayResponse
+	var response gatewayResponse
 	defer func() {
-		responseBytes, err := json.Marshal(response)
+		responseBytes, err := handler.parser.Encoding(response)
 		if err != nil {
 			log.LocalLogger.Error("Response Bytes Marshal Fail", zap.String("Error", err.Error()))
 			return
@@ -91,7 +69,6 @@ func (handler *GatewayHandler) Handle(writer http.ResponseWriter, request *http.
 		}
 	}()
 
-	var gatewayRequest GatewayRequest
 	requestBytes, err := ioutil.ReadAll(request.Body)
 	if err != nil {
 		log.LocalLogger.Error("Gateway Request Message Read All Fail", zap.String("Error", err.Error()))
@@ -101,14 +78,14 @@ func (handler *GatewayHandler) Handle(writer http.ResponseWriter, request *http.
 		return
 	}
 
-	if errorCode, errorMessage := gatewayRequest.Decoding(requestBytes); errorCode != protocol.ERROR_SUCCESS {
-		response.ApiResult.ErrorCode = errorCode
-		response.ApiResult.Message = protocol.ErrorMessageMap[errorCode]
-		response.ResponseData = errorMessage
+	gatewayRequest, serverError := handler.decodingRequest(requestBytes)
+	if serverError.ErrorCode != protocol.ERROR_SUCCESS {
+		response.ApiResult.ErrorCode = serverError.ErrorCode
+		response.ApiResult.Message = serverError.Error()
 		return
 	}
 
-	response.ApiResult = GatewayApiResult{
+	response.ApiResult = gatewayApiResult{
 		Seq:    *gatewayRequest.Seq,
 		ApiKey: *gatewayRequest.ApiKey,
 		ApiVer: *gatewayRequest.ApiVer,
@@ -116,15 +93,53 @@ func (handler *GatewayHandler) Handle(writer http.ResponseWriter, request *http.
 		Uid:    *gatewayRequest.Uid,
 	}
 
-	logicHandler, isExist := gameHandlerMap[*gatewayRequest.ApiKey]
+	logicHandler, isExist := handler.handlerMap[*gatewayRequest.ApiKey]
 	if isExist == false {
 		response.ApiResult.ErrorCode = protocol.ERROR_INVALID_API_KEY
 		response.ApiResult.Message = protocol.ErrorMessageMap[protocol.ERROR_INVALID_API_KEY]
 		return
 	}
 
-	errorCode, result := logicHandler.Handle(writer, request, gatewayRequest.Params)
-	response.ApiResult.ErrorCode = errorCode
-	response.ApiResult.Message = protocol.ErrorMessageMap[errorCode]
+	result, serverError := logicHandler.Handle(writer, request, &gatewayRequest)
+	response.ApiResult.ErrorCode = serverError.ErrorCode
+	response.ApiResult.Message = serverError.Error()
 	response.ResponseData = result
+}
+
+func (handler *GatewayHandler) decodingRequest(data []byte) (gatewayRequest, protocol.ServerError) {
+	var request gatewayRequest
+	err := handler.parser.Decoding(data, &request)
+	if err != nil {
+		log.LocalLogger.Error("GatewayRequest Decoding Fail", zap.String("Error", err.Error()))
+		return request, protocol.ServerError{ErrorCode: protocol.ERROR_GATEWAY_DECODING_FAIL}
+	}
+	if request.Seq == nil {
+		return request, protocol.ServerError{ErrorCode: protocol.ERROR_INVALID_REQUEST_VALUE}
+	}
+	if request.ApiKey == nil {
+		return request, protocol.ServerError{ErrorCode: protocol.ERROR_INVALID_REQUEST_VALUE}
+	}
+	if request.ApiVer == nil {
+		return request, protocol.ServerError{ErrorCode: protocol.ERROR_INVALID_REQUEST_VALUE}
+	}
+	if request.Ts == nil {
+		return request, protocol.ServerError{ErrorCode: protocol.ERROR_INVALID_REQUEST_VALUE}
+	}
+	if request.Uid == nil {
+		return request, protocol.ServerError{ErrorCode: protocol.ERROR_INVALID_REQUEST_VALUE}
+	}
+	if request.Sid == nil {
+		return request, protocol.ServerError{ErrorCode: protocol.ERROR_INVALID_REQUEST_VALUE}
+	}
+	if request.Version == nil {
+		return request, protocol.ServerError{ErrorCode: protocol.ERROR_INVALID_REQUEST_VALUE}
+	}
+	if request.Language == nil {
+		return request, protocol.ServerError{ErrorCode: protocol.ERROR_INVALID_REQUEST_VALUE}
+	}
+	if request.Resend == nil {
+		return request, protocol.ServerError{ErrorCode: protocol.ERROR_INVALID_REQUEST_VALUE}
+	}
+
+	return request, protocol.ServerError{ErrorCode: protocol.ERROR_SUCCESS}
 }

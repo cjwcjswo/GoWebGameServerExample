@@ -9,6 +9,7 @@ import (
 var LocalLogger, _ = zap.NewProduction()
 
 func InitLocalLog() bool {
+
 	level := zap.NewAtomicLevel()
 	level.SetLevel(zapcore.InfoLevel)
 

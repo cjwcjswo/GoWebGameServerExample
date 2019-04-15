@@ -9,10 +9,10 @@ import (
 )
 
 const (
-	LOCAL = "Local"
-	DEV   = "Dev"
-	QA    = "Qa"
-	LIVE  = "Live"
+	LOCAL = "LOCAL"
+	DEV   = "DEV"
+	QA    = "QA"
+	LIVE  = "LIVE"
 )
 
 var serverVersion string
@@ -20,7 +20,7 @@ var serverVersion string
 type AllConfig struct {
 	GameServerConfig
 	MySqlConfig
-	RedisConfig
+	CacheConfig
 }
 
 type GameServerConfig struct {
@@ -28,15 +28,15 @@ type GameServerConfig struct {
 }
 
 type MySqlConfig struct {
-	Address       string
-	RootName      string
-	Password      string
-	PoolSize      int
-	RequestBuffer int
+	Address     string
+	RootName    string
+	Password    string
+	MaxPoolSize int
 }
 
-type RedisConfig struct {
-	Address string
+type CacheConfig struct {
+	Address  string
+	Password string
 }
 
 func LoadConfig(version string) (AllConfig, bool) {
@@ -45,14 +45,15 @@ func LoadConfig(version string) (AllConfig, bool) {
 	} else {
 		serverVersion = version
 	}
+	ApplyServerVersion()
 
+	log.LocalLogger.Info("LoadConfig!", zap.String("ServerVersion", version))
 	currentDir, err := filepath.Abs(filepath.Dir(os.Args[0]))
-	configDir := currentDir + "/../../configs"
-
 	if err != nil {
 		return AllConfig{}, false
 	}
 
+	configDir := currentDir + "/../../configs"
 	config, err := ini.Load(filepath.FromSlash(configDir + "/config" + version + ".ini"))
 	if err != nil {
 		return AllConfig{}, false
@@ -63,15 +64,15 @@ func LoadConfig(version string) (AllConfig, bool) {
 	section := config.Section("GameServer")
 	allConfig.GameServerConfig.Address = section.Key("Address").String()
 
-	section = config.Section("Redis")
-	allConfig.RedisConfig.Address = section.Key("Address").String()
-
 	section = config.Section("MySQL")
 	allConfig.MySqlConfig.Address = section.Key("Address").String()
 	allConfig.MySqlConfig.RootName = section.Key("RootName").String()
 	allConfig.MySqlConfig.Password = section.Key("Password").String()
-	allConfig.MySqlConfig.PoolSize, _ = section.Key("PoolSize").Int()
-	allConfig.MySqlConfig.RequestBuffer, _ = section.Key("RequestBuffer").Int()
+	allConfig.MySqlConfig.MaxPoolSize, _ = section.Key("MaxPoolSize").Int()
+
+	section = config.Section("Cache")
+	allConfig.CacheConfig.Address = section.Key("Address").String()
+	allConfig.CacheConfig.Password = section.Key("Password").String()
 
 	if checkConfig(&allConfig) == false {
 		return AllConfig{}, false
@@ -88,12 +89,6 @@ func checkConfig(config *AllConfig) bool {
 		return false
 	}
 
-	// Check Redis
-	if config.RedisConfig.Address == "" {
-		log.LocalLogger.Error("RedisConfig address is empty!")
-		return false
-	}
-
 	// Check Mysql
 	if config.MySqlConfig.Address == "" {
 		log.LocalLogger.Error("MysqlConfig address is empty!")
@@ -103,27 +98,29 @@ func checkConfig(config *AllConfig) bool {
 		log.LocalLogger.Error("MysqlConfig root name is empty!")
 		return false
 	}
-	if config.MySqlConfig.PoolSize < 1 {
-		log.LocalLogger.Error("MysqlConfig PoolSize < 1!", zap.Int("PoolSize", config.MySqlConfig.PoolSize))
-		return false
-	}
-	if config.MySqlConfig.RequestBuffer < 1 {
-		log.LocalLogger.Error("MysqlConfig RequestBuffer < 1!", zap.Int("RequestBuffer", config.MySqlConfig.RequestBuffer))
+	if config.MySqlConfig.MaxPoolSize < 0 {
+		log.LocalLogger.Error("MysqlConfig PoolSize < 0!", zap.Int("PoolSize", config.MySqlConfig.MaxPoolSize))
 		return false
 	}
 
+	// Check Cache
+	if config.CacheConfig.Address == "" {
+		log.LocalLogger.Error("CacheConfig address is empty!")
+		return false
+	}
 	return true
 }
 
 func writeInfoLog(config *AllConfig) {
 	log.LocalLogger.Info("GameServerConfig", zap.String("Address", config.GameServerConfig.Address))
-	log.LocalLogger.Info("RedisConfig", zap.String("Address", config.RedisConfig.Address))
 	log.LocalLogger.Info("MysqlConfig",
 		zap.String("Address", config.MySqlConfig.Address),
 		zap.String("RootName", config.MySqlConfig.RootName),
 		zap.String("Password", config.MySqlConfig.Password),
-		zap.Int("PoolSize", config.MySqlConfig.PoolSize),
-		zap.Int("RequestBuffer", config.MySqlConfig.RequestBuffer))
+		zap.Int("MaxPoolSize", config.MySqlConfig.MaxPoolSize))
+	log.LocalLogger.Info("CacheConfig",
+		zap.String("Address", config.CacheConfig.Address),
+		zap.String("Password", config.CacheConfig.Password))
 }
 
 func CheckServerVersion(version string) bool {
@@ -136,6 +133,19 @@ func CheckServerVersion(version string) bool {
 		{
 			return false
 		}
+	}
+}
+
+func ApplyServerVersion() {
+	switch serverVersion {
+	case LOCAL:
+		UrlConfig = UrlConfigLocal{}
+	case DEV:
+		UrlConfig = UrlConfigDev{}
+	case QA:
+		UrlConfig = UrlConfigQa{}
+	case LIVE:
+		UrlConfig = UrlConfigLive{}
 	}
 }
 

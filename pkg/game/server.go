@@ -11,23 +11,25 @@ import (
 
 type gameServer struct {
 	config.AllConfig
+
+	gatewayHandler *handler.GatewayHandler
 }
 
 func NewGameServer(config config.AllConfig) (*gameServer, bool) {
 	server := new(gameServer)
 	server.AllConfig = config
 
-	// RDB 세팅
+	// RDB Setting
 	log.LocalLogger.Info("Rdb Init Start!")
-	if db.InitRdb(config.MySqlConfig) == false {
+	if db.InitRdbEngine(config.MySqlConfig, config.CacheConfig) == false {
 		return nil, false
 	}
 	log.LocalLogger.Info("Rdb Init Finish!")
 
-	// Handler 세팅
-	log.LocalLogger.Info("Handler Init Start!")
-	handler.InitGameHandler()
-	log.LocalLogger.Info("Handler Init Finish!")
+	// Gateway Setting
+	log.LocalLogger.Info("Gateway Init Start!")
+	server.gatewayHandler = handler.NewGatewayHandler()
+	log.LocalLogger.Info("Gateway Init Finish!")
 
 	return server, true
 }
@@ -36,8 +38,10 @@ func (server gameServer) StartServer() {
 	defer server.Close()
 	log.LocalLogger.Info("Start Server!")
 
-	gatewayHandler := handler.GetGateWayHandler()
-	http.HandleFunc("/", gatewayHandler.Handle)
+	// Enroll Gateway Handler
+	http.HandleFunc("/", server.gatewayHandler.Handle)
+
+	// Start Listen And Serve
 	err := http.ListenAndServe(server.GameServerConfig.Address, nil)
 	if err != nil {
 		log.LocalLogger.Error("Server Start Fail!", zap.String("Error", err.Error()))
@@ -46,5 +50,5 @@ func (server gameServer) StartServer() {
 
 func (server gameServer) Close() {
 	log.LocalLogger.Info("End Server!")
-	db.CloseRdb()
+	db.CloseRdbEngine()
 }
