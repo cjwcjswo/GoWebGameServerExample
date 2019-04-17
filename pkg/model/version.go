@@ -10,10 +10,10 @@ type Version struct {
 	AppId               string `json:"app_id"`
 }
 
-func (version Version) TableName() string {
+func (Version) TableName() string {
 	return "TB_VERSION"
 }
 
-func (version Version) GetShardKey() int {
+func (Version) GetShardKey() int {
 	return protocol.SHARD_ID_COMMON
 }

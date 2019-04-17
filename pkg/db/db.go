@@ -3,8 +3,11 @@ package db
 import (
 	"GoWebGameServerExample/pkg/config"
 	"GoWebGameServerExample/pkg/log"
+	"GoWebGameServerExample/pkg/protocol"
+	"fmt"
+	_ "github.com/go-sql-driver/mysql"
 	"github.com/go-xorm/xorm"
-	"github.com/go-xorm/xorm-redis-cache"
+	xormrediscache "github.com/go-xorm/xorm-redis-cache"
 	"go.uber.org/zap"
 	"time"
 )
@@ -16,85 +19,47 @@ type InterfaceStore interface {
 	Close()
 }
 
-type MainDataStore struct {
-	ormEngine *xorm.Engine
-	shardName string
-	shardId   int
-}
+var storeList []InterfaceStore
 
-func (store *MainDataStore) InitEngine(mysqlConfig *config.MySqlConfig, cacheConfig *config.CacheConfig, dataSource string) bool {
-	if store.ormEngine = newEngine(mysqlConfig, cacheConfig, dataSource); store.ormEngine == nil {
-		return false
+func InitRdbEngine(mysqlConfig config.MySqlConfig, cacheConfig config.CacheConfig) bool {
+	storeList = []InterfaceStore{
+		&MainDataStore{shardName: "DANCEVILLE_" + config.GetServerVersion() + "_SHARD_00", shardId: protocol.SHARD_ID_MAIN},
+		&DataStore{shardName: "DANCEVILLE_" + config.GetServerVersion() + "_SHARD_01", shardId: protocol.SHARD_ID_DATA_1},
+		&DataStore{shardName: "DANCEVILLE_" + config.GetServerVersion() + "_SHARD_02", shardId: protocol.SHARD_ID_DATA_2},
+		&DataStore{shardName: "DANCEVILLE_" + config.GetServerVersion() + "_SHARD_03", shardId: protocol.SHARD_ID_DATA_3},
+		&CommonDataStore{shardName: "DANCEVILLE_" + config.GetServerVersion() + "_SHARD_50", shardId: protocol.SHARD_ID_COMMON},
+	}
+	storeListLength := len(storeList)
+
+	// Engine Setting
+	for i := 0; i < storeListLength; i++ {
+		dataSource := parsingInfoToDataSourceName(mysqlConfig.RootName, mysqlConfig.Password, mysqlConfig.Address, storeList[i].GetShardName())
+
+		if storeList[i].InitEngine(&mysqlConfig, &cacheConfig, dataSource) == false {
+			return false
+		}
 	}
 	return true
 }
 
-func (store *MainDataStore) GetShardId() int {
-	return store.shardId
-}
-
-func (store *MainDataStore) GetShardName() string {
-	return store.shardName
-}
-
-func (store *MainDataStore) Close() {
-	if store.ormEngine != nil {
-		_ = store.ormEngine.Close()
+func CloseRdbEngine() {
+	for _, rdbEngine := range storeList {
+		rdbEngine.Close()
 	}
+	storeList = nil
 }
 
-type DataStore struct {
-	ormEngine *xorm.Engine
-	shardName string
-	shardId   int
-}
-
-func (store *DataStore) InitEngine(mysqlConfig *config.MySqlConfig, cacheConfig *config.CacheConfig, dataSource string) bool {
-	if store.ormEngine = newEngine(mysqlConfig, cacheConfig, dataSource); store.ormEngine == nil {
-		return false
+func FindEngineByShardId(shardId int) InterfaceStore {
+	for _, store := range storeList {
+		if store.GetShardId() == shardId {
+			return store
+		}
 	}
-	return true
+	return nil
 }
 
-func (store *DataStore) GetShardId() int {
-	return store.shardId
-}
-
-func (store *DataStore) GetShardName() string {
-	return store.shardName
-}
-
-func (store *DataStore) Close() {
-	if store.ormEngine != nil {
-		_ = store.ormEngine.Close()
-	}
-}
-
-type CommonDataStore struct {
-	ormEngine *xorm.Engine
-	shardName string
-	shardId   int
-}
-
-func (store *CommonDataStore) InitEngine(mysqlConfig *config.MySqlConfig, cacheConfig *config.CacheConfig, dataSource string) bool {
-	if store.ormEngine = newEngine(mysqlConfig, cacheConfig, dataSource); store.ormEngine == nil {
-		return false
-	}
-	return true
-}
-
-func (store *CommonDataStore) GetShardId() int {
-	return store.shardId
-}
-
-func (store *CommonDataStore) GetShardName() string {
-	return store.shardName
-}
-
-func (store *CommonDataStore) Close() {
-	if store.ormEngine != nil {
-		_ = store.ormEngine.Close()
-	}
+func parsingInfoToDataSourceName(rootName string, password string, address string, dbName string) string {
+	return fmt.Sprintf("%s:%s@tcp(%s)/%s", rootName, password, address, dbName)
 }
 
 func newEngine(mysqlConfig *config.MySqlConfig, cacheConfig *config.CacheConfig, dataSource string) *xorm.Engine {
@@ -114,7 +79,7 @@ func newEngine(mysqlConfig *config.MySqlConfig, cacheConfig *config.CacheConfig,
 	}
 	log.LocalLogger.Info("Init Max Pool Size", zap.String("DataSource", dataSource), zap.Int("MaxPoolSize", mysqlConfig.MaxPoolSize))
 	ormEngine.SetMaxOpenConns(mysqlConfig.MaxPoolSize)
-	ormEngine.ShowSQL(true)
+	//ormEngine.ShowSQL(true)
 
 	// Cache Setting
 	cache := xormrediscache.NewRedisCacher(cacheConfig.Address, cacheConfig.Password, time.Duration(24*time.Hour), nil)

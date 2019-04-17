@@ -6,8 +6,10 @@ import (
 	"GoWebGameServerExample/pkg/log"
 	"GoWebGameServerExample/pkg/model"
 	"GoWebGameServerExample/pkg/protocol"
+	"GoWebGameServerExample/pkg/service"
 	"backup/goTcpLib"
 	"encoding/json"
+	"github.com/mcuadros/go-version"
 	"go.uber.org/zap"
 	"net/http"
 )
@@ -19,6 +21,8 @@ const (
 	UPDATE_TYPE_FORCE  = 1
 	UPDATE_TYPE_SERVER = 2
 	UPDATE_TYPE_CLIENT = 3
+
+	DEFAULT_VERSION = "0.00.00"
 )
 
 type checkUpdateParams struct {
@@ -58,10 +62,10 @@ func (handler *checkUpdateHandler) Handle(writer http.ResponseWriter, request *h
 	updateUrl := ""
 	updateState := UPDATE_TYPE_NORMAL
 	forceUpdate := false
-	versionList, errorCode := checkAppUpdate(params.AppVersion)
+	versionList, errorCode := handler.checkAppUpdate(params.AppVersion)
 	if errorCode != protocol.ERROR_SUCCESS {
 		// Fail Fetch Version
-		result, errorCode := getUpdateUrl(params.Platform)
+		result, errorCode := handler.getUpdateUrl(params.Platform)
 		if errorCode != protocol.ERROR_SUCCESS {
 			return nil, protocol.ServerError{ErrorCode: errorCode}
 		}
@@ -70,12 +74,12 @@ func (handler *checkUpdateHandler) Handle(writer http.ResponseWriter, request *h
 		forceUpdate = true
 	}
 
-	latestServerVersion, errorCode := getServerVersion(versionList, params.AppVersion)
+	latestServerVersion, errorCode := handler.getServerVersion(versionList, params.AppVersion)
 	if errorCode != protocol.ERROR_SUCCESS {
 		return nil, protocol.ServerError{ErrorCode: errorCode}
 	}
 
-	if !forceUpdate && params.ClientServerVersion < latestServerVersion.AppVersion {
+	if !forceUpdate && (params.ClientServerVersion < latestServerVersion.LatestServerVersion) {
 		updateState = UPDATE_TYPE_SERVER
 	}
 	if !forceUpdate {
@@ -87,12 +91,14 @@ func (handler *checkUpdateHandler) Handle(writer http.ResponseWriter, request *h
 		}
 	}
 
+	//minVersion := service.GetPatchGameData().GetMinPatchGameDataServerVersion()
+	//handler.getMetaPatchGameData("Meta", latestServerVersion.LatestServerVersion)
 	// Skip...
 	resourceMetaDto := "Test"
 
 	return checkUpdateResponse{
 		ResourceMetaDto:     resourceMetaDto,
-		Path:                config.UrlConfig.GetPatchFileDownloadUrl(),
+		Path:                config.Config.GetPatchFileDownloadUrl(),
 		UpdateState:         updateState,
 		UpdateUrl:           updateUrl,
 		LatestServerVersion: latestServerVersion.LatestServerVersion,
@@ -103,8 +109,8 @@ func (handler *checkUpdateHandler) GetApiName() string {
 	return API_NAME_CHECK_UPDATE
 }
 
-func checkAppUpdate(appVersion string) ([]model.Version, protocol.ErrorCode) {
-	versionList, err := dao.GetVersionDao().SelectAll()
+func (checkUpdateHandler) checkAppUpdate(appVersion string) ([]model.Version, protocol.ErrorCode) {
+	versionList, err := dao.GetVersion().SelectAll()
 	if err != nil {
 		log.LocalLogger.Error("SelectAll Error", zap.String("Error", err.Error()))
 		return nil, protocol.ERROR_MYSQL_FAIL
@@ -124,8 +130,8 @@ func checkAppUpdate(appVersion string) ([]model.Version, protocol.ErrorCode) {
 	return versionList, protocol.ERROR_SUCCESS
 }
 
-func getUpdateUrl(platform string) (string, protocol.ErrorCode) {
-	updateUrlGroup := config.UrlConfig.GetUpdateUrlGroup()
+func (checkUpdateHandler) getUpdateUrl(platform string) (string, protocol.ErrorCode) {
+	updateUrlGroup := config.Config.GetUpdateUrlGroup()
 	result, isExist := updateUrlGroup[platform]
 	if !isExist {
 		return "", protocol.ERROR_WRONG_PLATFORM
@@ -133,11 +139,24 @@ func getUpdateUrl(platform string) (string, protocol.ErrorCode) {
 	return result, protocol.ERROR_SUCCESS
 }
 
-func getServerVersion(versionList []model.Version, appVersion string) (model.Version, protocol.ErrorCode) {
+func (checkUpdateHandler) getServerVersion(versionList []model.Version, appVersion string) (model.Version, protocol.ErrorCode) {
 	for _, version := range versionList {
 		if version.AppVersion == appVersion {
 			return version, protocol.ERROR_SUCCESS
 		}
 	}
 	return model.Version{}, protocol.ERROR_APP_VERSION_DATA_NOT_FOUND
+}
+
+func (checkUpdateHandler) getMetaPatchGameData(designDataName string, latestVersion string) []model.PatchGameData {
+	patchGameDataAll := service.GetPatchGameData().GetPatchGameDataGroup()
+	result := make([]model.PatchGameData, 0, 64)
+
+	for _, patchGameData := range patchGameDataAll {
+
+		if (version.CompareSimple(patchGameData.ServerVersion, latestVersion) < 0) && patchGameData.DesignDataName == designDataName {
+			result = append(result, patchGameData)
+		}
+	}
+	return result
 }

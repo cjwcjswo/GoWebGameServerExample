@@ -10,14 +10,14 @@ import (
 )
 
 type gameServer struct {
-	config.AllConfig
+	config.InitConfig
 
 	gatewayHandler *handler.GatewayHandler
 }
 
-func NewGameServer(config config.AllConfig) (*gameServer, bool) {
+func NewGameServer(config config.InitConfig) (*gameServer, bool) {
 	server := new(gameServer)
-	server.AllConfig = config
+	server.InitConfig = config
 
 	// RDB Setting
 	log.LocalLogger.Info("Rdb Init Start!")

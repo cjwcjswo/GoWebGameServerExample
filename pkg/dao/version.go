@@ -8,34 +8,34 @@ import (
 	"encoding/gob"
 )
 
-var versionDao *VersionDao
+var version *Version
 
-type VersionDao struct {
+type Version struct {
 	store *db.CommonDataStore
 }
 
-func NewVersionDao() *VersionDao {
-	versionDao := new(VersionDao)
+func NewVersion() *Version {
+	version := new(Version)
 
 	gob.Register(new(model.Version))
 	storeInterface := db.FindEngineByShardId(protocol.SHARD_ID_COMMON)
 	if storeInterface == nil {
-		log.LocalLogger.Error("VersionDao Init Fail - no store interface")
+		log.LocalLogger.Error("Version Init Fail - no store interface")
 		return nil
 	}
-	versionDao.store = storeInterface.(*db.CommonDataStore)
-	return versionDao
+	version.store = storeInterface.(*db.CommonDataStore)
+	return version
 }
 
-func GetVersionDao() *VersionDao {
-	if versionDao == nil {
-		versionDao = NewVersionDao()
-		return versionDao
+func GetVersion() *Version {
+	if version == nil {
+		version = NewVersion()
+		return version
 	}
-	return versionDao
+	return version
 }
 
-func (dao *VersionDao) SelectAll() ([]model.Version, error) {
+func (dao *Version) SelectAll() ([]model.Version, error) {
 	var result []model.Version
 	err := dao.store.SelectAll(&result)
 	return result, err
